@@ -1,0 +1,602 @@
+---
+title: "Analysis of  Salaries  in 2024"
+author: "Souhaila El kadaoui"
+date: "2024-08-30"
+output:
+  html_document:
+    theme: journal
+    toc: true
+  pdf_document:
+    toc: true
+  word_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#  1.Introduction
+The project aims to provide an overview of jobs and salaries for 2024. The dataset focuses on trends in jobs and salaries for 2024 and includes information on internship titles, company names, locations, estimated salaries, and company ratings. The columns in the dataset are as follows:  
+
+-**Company:** Name of the hiring company.  
+-**Company Score:** Average rating of the company.  
+-**Job Title:** Title of the internship position.  
+-**Location:** Job location, including city and state (or if remote).  
+-**Salary:** Estimated salary range for the internship position, as listed by the employer or Glassdoor.   
+ 
+ 
+# 2.Objectives of the Project
+-Comparison of salaries between different companies.  
+-Evaluation of employee reviews for companies with high and low salaries.  
+-Average salary determination for each job.  
+   
+
+
+#  3.Project Steps and Processes
+### 3.1 Project's tools
+-R as a programming language
+-dplyr & ggplot2,knitr  stringr,RColorBrewer R's Packages for manipulation and visualization of data
+-R markdown
+### 3.2 Import necessary packages
+```{r}
+#Suppress messages when loading the dplyr package
+suppressMessages(library(knitr))
+suppressWarnings(library(knitr))
+suppressMessages(library(dplyr))
+suppressWarnings(library(dplyr))
+suppressMessages(library(ggplot2))
+suppressWarnings(library(ggplot2))
+suppressMessages(library(stringr))
+suppressWarnings(library(stringr))
+suppressMessages(library(RColorBrewer))
+suppressWarnings(library(RColorBrewer))
+suppressMessages(library(gridExtra))
+suppressWarnings(library(gridExtra))
+library(dplyr)
+library(ggplot2)
+library(knitr)
+library(stringr)
+library(RColorBrewer)
+library(gridExtra)
+
+
+```
+
+###  3.3 Data Cleaning
+#### load data
+```{r}
+suppressMessages({
+  suppressWarnings({
+    data <- read.csv(file.choose(), header = TRUE, sep = ",")
+    df <- data.frame(data) #make sure to have data frame structure which is more flexible for using
+    invisible(head(df)) #to hide console output
+  })
+})
+```
+
+#### Display the first 6 rows as a table
+```{r}
+kable(head(df), caption = "First 6 Rows of the dataframe")
+
+```
+#### correct columns names to avoid problems (related to ".")
+```{r}
+df=rename(df,Company_Score=Company.Score,Job_Title=Job.Title)
+#verify the  correction
+colnames(df)
+```
+####  Verify duplicated rows
+```{r}
+cat("the number of duplicated rows is:",sum(duplicated(df)))
+```
+#### verify missing values in cases of columns
+```{r}
+missing_values <- sapply(df, function(x) sum(is.na(x)))
+print("Number of missing values for each columns")
+missing_values
+n=nrow(df)
+#remove rows with missing cases
+df <- df[!is.na(df$Company) & !is.na(df$Company_Score) & !is.na(df$Job_Title) & !is.na(df$Location) & !is.na(df$Salary), ]
+#ignore  empty cases(don't respect rows format),  which dosn't remove if the condition above
+df=df[1:500,]
+n1=nrow(df)
+cat("the rows number with missing values is ",n,".After correction will be ",n1," rows")
+
+
+```
+#### verify data types of columns
+```{r}
+print("Data types:")
+
+for (i in 1:ncol(df)) {
+  column_name <- names(df)[i]
+  column_data <- df[[i]]
+  
+  # Check if all elements are numeric
+  if (all(sapply(column_data, is.numeric))) {
+    cat(column_name, "elements are numeric\n")
+  } 
+  # Check if all elements are character
+  else if (all(sapply(column_data, is.character))) {
+    cat(column_name, "elements are character\n")
+  } 
+  # If elements are neither numeric nor character
+  else {
+    cat(column_name, "elements aren't numeric or character\n")
+  }
+}
+
+```
+#### correct Salary column data format 
+```{r}
+# Initialize vectors
+reference <- vector("character", length = nrow(df))
+categories_salary <- vector("character", length = nrow(df))
+
+
+for (i in 1:nrow(df)) {
+  # extract refrence of informations
+  extracted <- str_extract(df$Salary[i], "(?<=\\().+?(?=\\))")
+  df$Salary[i] <- gsub("\\s*\\([^\\)]+\\)", "", df$Salary[i])
+  if (!is.na(extracted)) {
+    reference[i] <- gsub("est", "", extracted)
+  } else {
+    reference[i] <- "Unknown reference"
+  }
+  
+}
+# Add the vectors to the data frame
+df$Reference <- reference
+# create salary columns without others character data
+# Initialize vectors to store the results
+numeric_range <- vector("character", length = nrow(df))
+category <- vector("character", length = nrow(df))
+for (i in 1:nrow(df)) {
+  salary <- df$Salary[i]
+  
+  if (str_detect(salary, "^\\$\\d+\\.\\d{2}\\s*-\\s*\\$\\d+\\.\\d{2}\\s+.*")) {                 # verify the format :"$20.63 - $30.25 Per Hour "
+    result <- str_match(salary, "(\\$\\d+\\.\\d{2}\\s*-\\s*\\$\\d+\\.\\d{2})\\s*(.*)") #extract sub part   
+    
+    # extract numeric part
+    numeric_range[i] <- result[2]  # "$20.63 - $30.25 "
+    category[i] <- "Per Hour"      # "Per Hour" 
+  }
+  else if(str_detect(salary,"^\\$\\d{1,3}K\\s*-\\s*\\$\\d{1,3}K\\s*$")){     #"$20.63 - $30.25 "
+    numeric_range[i]=salary
+    category[i]="Annual"
+    
+  }
+  else if(str_detect(salary,"^\\$\\d+\\.\\d{2}\\s+Per Hour\\s*$")){ #format:"$22.86"
+     result <- str_match(salary, "(\\$\\d+\\.\\d{2})\\s+Per Hour")
+    
+    numeric_range[i] <- result[2]  # "$22.86"
+    category[i] <- "Per Hour" 
+  }
+  else if(str_detect(salary,"^\\$\\d+(\\.\\d{1,2})?K\\s*$")) {       #format "$22.86K"
+     numeric_range[i]=salary
+    category[i]="Annual"
+    
+  }
+  
+}
+#add result to dataframe
+df$Salary_Range <- numeric_range
+df$Category <- category
+#remove original salary column
+df=df[1:nrow(df),-5]
+#create Mean_Salary Column to make sure of  data homogenity
+
+pattern_dollars_range <-"^\\$\\d+\\.\\d{2}\\s*-\\s*\\$\\d+\\.\\d{2}$"            #"$77 - $130"
+df$Mean_SalaryUSD=NA
+# correct salary data type: convert to numeric
+for (i in 1:nrow(df)) {
+  salary <- df$Salary[i]
+  # Vérifier si la chaîne correspond au format avec une plage de valeurs
+  if (str_detect(salary, pattern_dollars_range)) { #extract salary with  format  "$44.99-$7.99"
+     
+    pattern <- "\\$([\\d\\.]+)\\s*-\\s*\\$([\\d\\.]+)"
+ result <- str_match(salary, pattern)#split $ symbole to numbers
+    
+    if (!is.na(result[1])) {
+      min_salary <- as.numeric(result[2])
+      max_salary <- as.numeric(result[3])
+      Moy=c(min_salary,max_salary)
+      
+      df$Mean_SalaryUSD[i] <- mean(Moy)
+    }
+  }
+  else if(str_detect(salary,"^\\$([\\d]+)K\\s*-\\s*\\$([\\d]+)K\\s*$")){  #extract salary from  "$44.99K-$7.99K"
+   
+     result <- str_match(salary, "^\\$([\\d]+)K\\s*-\\s*\\$([\\d]+)K\\s*$")
+
+# Vérifier si le résultat n'est pas NA
+if (!is.na(result[1])) {
+  # Convertir les montants en numériques, supprimer le "K" et utiliser les valeurs telles quelles
+  min_salary <- as.numeric(result[2])
+  max_salary <- as.numeric(result[3])
+   Moy=c(min_salary*1000,max_salary*1000)
+      
+      df$Mean_SalaryUSD[i] <- mean(Moy)
+}
+  }
+  else if (str_detect(salary,"^\\$\\d+\\.\\d{2}$")){ #extract salary from  "$44.99"
+    salary_numeric <- gsub("\\$", "", salary)
+salary_value <- as.numeric(salary_numeric)
+df$Mean_SalaryUSD[i]=salary_value
+
+  }
+  else if (str_detect(salary, "^\\$\\d+(\\.\\d{1,2})?K\\s*$")) {  #extract salary from  "$44.99K"
+    # Extraire la partie numérique sans le '$' et 'K'
+    number <- str_extract(salary, "\\d+(\\.\\d{1,2})?")
+    # Convertir en numérique et multiplier par 1000
+    numeric_value <- as.numeric(number) * 1000
+  df$Mean_SalaryUSD[i]=numeric_value
+  }}
+
+```
+#### reverify Mean_Salary_USD data
+```{r}
+
+column_name <- names(df)[8]
+column_data <- df[[8]]
+
+# Check if all elements are numeric, ignoring NAs
+check=all(sapply(column_data, function(x) is.numeric(x) )) 
+cat(column_name, " are  all elements numeric?",check)
+ 
+
+
+```
+### 3.4 statistic Summarize
+```{r}
+
+
+# Calculate the mean salary for each category (Annual and Per Hour)
+mean_salaries <- tapply(df$Mean_SalaryUSD, df$Category, mean, na.rm = TRUE)
+# Display the results
+cat("The mean salary in both cases (Annual or Per Hour in $) for all selected Jobs is:\n")
+cat(" Annual Salary :", mean_salaries["Annual"], "$\t")
+cat("Per Hour Salary:", mean_salaries["Per Hour"], "$\n")
+
+#specify if we want to calculate max salary of each job,or mean salary ,if annual or per hour ,type are:(min_,max_,mean_)
+summarise_job=function(df,type,cat){
+  if(type=="max_"){
+    X=data.frame(Job_vs_Per_hour_Salary=tapply(df$Mean_SalaryUSD[df$Category == cat], df$Job_Title[df$Category == cat],max))
+  }
+  if(type=="min_"){
+    X=data.frame(Job_vs_Per_hour_Salary=tapply(df$Mean_SalaryUSD[df$Category == cat], df$Job_Title[df$Category == cat],min))
+  }
+  if(type=="mean_"){
+     X=data.frame(Job_vs_Per_hour_Salary=tapply(df$Mean_SalaryUSD[df$Category == cat], df$Job_Title[df$Category == cat],mean))
+  }
+  return(X)
+}
+#mean annualy of each job
+result_An=summarise_job(df,"mean_","Annual")
+result_PerH=summarise_job(df,"mean_","Per Hour")
+max_An=summarise_job(df,"max_","Annual")
+max_PH=summarise_job(df,"max_","Per Hour")
+min_An=summarise_job(df,"min_","Annual")
+min_PH=summarise_job(df,"min_","Per Hour")
+```
+#### the mean annual  salary($) of some data intern/job selected 
+```{r}
+for (i in seq(1:40)) {
+  # Check if the job title contains the word "data"
+  if (grepl("data", rownames(result_An)[i], ignore.case = TRUE)) {
+    # Print the job title and corresponding mean annual salary
+    cat(rownames(result_An)[i], ":", result_An[i, 1], "\n")
+  }
+}
+```
+#### the min annual  salary($) of some data intern/job selected 
+```{r}
+for (i in seq(1:40)) {
+  # Check if the job title contains the word "data"
+  if (grepl("data", rownames(min_An)[i], ignore.case = TRUE)) {
+    # Print the job title and corresponding mean annual salary
+    cat(rownames(min_An)[i], ":", min_An[i, 1], "\n")
+  }
+}
+```
+#### the max annual  salary($) of some data intern/job selected 
+```{r}
+for (i in seq(1:40)) {
+  # Check if the job title contains the word "data"
+  if (grepl("data", rownames(max_An)[i], ignore.case = TRUE)) {
+    # Print the job title and corresponding mean annual salary
+    cat(rownames(max_An)[i], ":", max_An[i, 1], "\n")
+  }
+}
+```
+
+#### the  of Per_Hour salary($) of some data intern/job selected 
+```{r}
+for (i in 1:nrow(result_PerH)) {
+  # Check if the job title contains the word "data"
+  if (grepl("data", rownames(result_PerH)[i], ignore.case = TRUE)) {
+    # Print the job title and corresponding mean annual salary
+    cat(rownames(result_PerH)[i], ":", result_PerH[i, 1], "\n")
+  }
+}
+```
+#### The variance of annual/Per Hour salary from mean Salary
+```{r}
+#Group by categories
+std=vector(length = 2)
+
+std[1]=sd(df$Mean_SalaryUSD[ df$Category=="Annual"])
+std[2]=sd(df$Mean_SalaryUSD[ df$Category=="Per Hour" ])
+cat("The (Annual,Per Hour) Salary  variation between jobs can attend :(",std[1],"$,",std[2],"$ )")
+```
+#### the maximum and minimum salary in 2024 
+```{r}
+min_max=function(df,category){
+  max_salary=max(df$Mean_Salary[df$Category == category])
+  min_salary <- min(df$Mean_Salary[df$Category == category])
+  max_index <- which.max(df$Mean_Salary[df$Category == category])
+  min_index <- which.min(df$Mean_Salary[df$Category == category])
+  return (c(max_salary,max_index,min_salary,min_index))
+}
+Annual_max_min=vector(length=4)
+Per_Hour_max_min=vector(length=4)
+Annual_max_min=min_max(df,"Annual")
+Per_Hour_max_min=min_max(df,"Per Hour")
+index_min=as.numeric(Per_Hour_max_min[4])
+index_max=as.numeric(Per_Hour_max_min[2])
+index_min1=as.numeric(Annual_max_min[4])
+index_max1=as.numeric(Annual_max_min[2])
+cat("The (minimum, maximum) salary in Per Hour are (", 
+    Per_Hour_max_min[3], "$,", Per_Hour_max_min[1], "$) for", 
+    df$Job_Title[index_min], " & ", df$Job_Title[index_max], 
+    "jobs in", df$Company[index_min], "and", df$Company[index_max], " respectfully\n")
+cat("The (minimum, maximum)  Annual salary  are (", 
+    Annual_max_min[3], "$,", Annual_max_min[1], "$) for", 
+    df$Job_Title[index_min1], " & ", df$Job_Title[index_max1], 
+    "jobs in", df$Company[index_min1], "and", df$Company[index_max1], " respectfully\n")
+```
+#### distribution of salary 
+```{r}
+quantiles_salary=function(df,cat){
+  q1=quantile(df$Mean_Salary[df$Category==cat],0.25)
+  q2=quantile(df$Mean_Salary[df$Category==cat],0.5)
+  q3=quantile(df$Mean_Salary[df$Category==cat],0.75)
+  return(c(q1,q2,q3))
+}
+Annualy=quantiles_salary(df,"Annual")
+per_hour=quantiles_salary(df,"Per Hour")
+cat("25% of Annual  salaries are under  ",Annualy[1],"$.Median:  is ",Annualy[2],"$,and 75% are equal or  more then",Annualy[3],"$.")
+cat("25% of   salaries in Per hour are under  ",per_hour[1],"$.  Median:  is ",per_hour[2],"$,  and 75% are equal or  more then",per_hour[3],"$.")
+```
+
+### 3.5 Data Visualisation
+
+
+#### the 10 companies offer lower  Annual salary
+
+```{r}
+
+df1 <- df[order(df$Mean_SalaryUSD),]
+lower_sl <- df1$Mean_SalaryUSD[df1$Category == "Annual"][1:10]
+label_X <- vector(length = 10)
+for (i in seq_len(10)) {
+  label_X[i] <- paste(df1$Company[df1$Category == "Annual"][i], sep = "")
+}
+
+# Create a data frame for plotting
+plot_data <- data.frame(
+  Mean_Salary = lower_sl,
+  Label = factor(label_X, levels = label_X)  # Convert labels to factor to ensure correct order
+)
+options(repr.plot.width=45, repr.plot.height=5)
+# Create the bar plot with labels
+
+bar_colors <- brewer.pal(length(plot_data$Mean_Salary), "Set3")
+ggplot(plot_data, aes(x = Label, y = Mean_Salary)) +
+  geom_bar(stat = "identity", fill = bar_colors, color = "black") +
+  geom_text(aes(label = Mean_Salary), vjust = -0.5, size = 3) +
+  labs(x = "Company", y = "Mean Salary", title = "10 companies offer lower Annual salary") +
+   ylim(0, 5500) +  # Set the y-axis limits
+    theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 10))  
+```
+
+
+####  the 10 companies offer higher  Annual salary 
+```{r}
+data=df[order(df$Mean_SalaryUSD, decreasing = TRUE), ]
+higher_sl <- data$Mean_Salary[data$Category == "Annual"][1:10]
+label_X1 <- vector(length = 10)
+for (i in seq_len(10)) {
+  label_X1[i] <- paste(data$Company[data$Category == "Annual"][i], sep = "")
+}
+
+# Create a data frame for plotting
+plot_data1 <- data.frame(
+  Mean_Salary = higher_sl,
+  Label = factor(label_X1, levels = label_X1)  # Convert labels to factor to ensure correct order
+)
+options(repr.plot.width=45, repr.plot.height=5)
+# Create the bar plot with labels
+
+bar_colors <- brewer.pal(length(plot_data1$Mean_Salary), "Set3")
+ggplot(plot_data1, aes(x = Label, y = Mean_Salary)) +
+  geom_bar(stat = "identity", fill = bar_colors, color = "black") +
+  geom_text(aes(label = Mean_Salary), vjust = -0.5, size = 3) +
+  labs(x = "Company", y = "Mean Salary", title = "10 companies offer Higher Annual salary(2024)") +
+    
+    theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 10))   
+```
+
+
+####  the 10 companies offer higher Per Hour  salary
+
+```{r}
+higher_sl1 <- data$Mean_SalaryUSD[data$Category == "Per Hour"][1:10]
+label_X12 <- vector(length = 10)
+for (i in seq_len(10)) {
+  label_X12[i] <- paste(data$Company[data$Category == "Per Hour"][i], sep = "")
+}
+
+# Create a data frame for plotting
+plot_data2 <- data.frame(
+  Mean_Salary = higher_sl1,
+  Label = factor(label_X12, levels = label_X12)  # Convert labels to factor to ensure correct order
+)
+options(repr.plot.width=45, repr.plot.height=5)
+# Create the bar plot with labels
+
+num_colors <- length(plot_data2$Mean_Salary)
+blue_shades <- colorRampPalette(c( "darkblue","lightblue"))(num_colors)
+ggplot(plot_data2, aes(x = Label, y = Mean_Salary)) +
+  geom_bar(stat = "identity", fill = blue_shades, color = "black") +
+  geom_text(aes(label = Mean_Salary), vjust = -0.5, size = 3) +
+  labs(x = "Company", y = "Mean Salary", title = "10 companies offer Higher  salary in Per Hour(2024)") +
+     ylim(0, 500)+
+    theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 10))   
+```
+
+
+#### Jobs offer higher salary in Per Hour
+```{r}
+data21 <- df[order(df$Mean_SalaryUSD, decreasing = TRUE), c(3, 7, 8)]
+data2 <- data21[data21$Category == "Per Hour", ]
+data2_ <- data2[1:10, ]
+data2_$Job_Title <- substr(data2_$Job_Title, 1, 50)
+# Define shades of blue
+num_colors <- length(data2_$Mean_SalaryUSD)
+#blue_shades <- colorRampPalette(c("orange", "yellow"))(num_colors)
+blue_shades1 <- colorRampPalette(c( "darkblue","lightblue"))(num_colors)
+# Create the bar plot with shades of blue
+ggplot(data2_, aes(x = Job_Title, y = Mean_SalaryUSD)) +
+  geom_bar(stat = "identity", color = "black",fill=blue_shades1) +
+  geom_text(aes(label = Mean_SalaryUSD), vjust = -0.5, size = 3) +
+  scale_fill_manual(values = blue_shades1) +  # Apply custom shades of blue
+  labs(x = "Job Title", y = "Mean Salary", title = "10 Jobs Offer Higher Salary in Per Hour (2024)") +
+  coord_cartesian(ylim = c(0, 200)) +  # Set y-axis limits
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 10))  
+
+```
+
+
+#### Jobs offer higher  Annual salary
+```{r}
+
+data3 <- data21[data21$Category == "Annual", ]
+data3_ <- data3[1:10, ]
+data3_$Job_Title <- substr(data3_$Job_Title, 1, 35)
+# Define shades of blue
+num_colors <- length(data3_$Mean_SalaryUSD)
+blue_shades <- colorRampPalette(c("skyblue", "blue"))(num_colors)
+
+
+blue_shades7 <- colorRampPalette(c("violet", "pink"))(num_colors)
+ggplot(data3_, aes(x = Job_Title, y = Mean_SalaryUSD)) +
+  geom_bar(stat = "identity", color = "black",fill=blue_shades7) +
+  geom_text(aes(label = Mean_SalaryUSD), vjust = -0.5, size = 3) +
+  scale_fill_manual(values = blue_shades) +  # Apply custom shades of blue
+  labs(x = "Job Title", y = "Mean Salary", title = "10 Jobs Offer Higher Annual Salary  (2024)") +
+  ylim(0, 200000) +
+    # Set y-axis limits
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 10))  
+```
+
+
+####  Higher  Annual Offers 's Location
+ 
+```{r}
+data_4=data[data$Category=="Annual",]
+data_4=data_4[1:10,]
+num_colors <- length(data_4$Mean_SalaryUSD)
+blue_shades2 <- colorRampPalette(c("red", "pink"))(num_colors)
+
+# Create the bar plot with shades of blue
+ggplot(data_4, aes(x = Location, y = Mean_SalaryUSD)) +
+  geom_bar(stat = "identity", color = "black",fill=blue_shades2) +
+  geom_text(aes(label = Mean_SalaryUSD), vjust = -0.5, size = 3) +
+  scale_fill_manual(values = blue_shades) +  # Apply custom shades of blue
+  labs(x = "Location", y = "Mean Salary", title = "10 Higher  Annual Offers 's Location  (2024)") +
+    # Set y-axis limits
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 10))  
+```
+
+#### Higher   Offers salary in Per Hour 's Location
+```{r}
+data_5=data[data$Category=="Per Hour",]
+data_5=data_5[1:10,]
+num_colors <- length(data_5$Mean_SalaryUSD)
+blue_shades5 <- colorRampPalette(c("orange", "yellow"))(num_colors)
+
+ggplot(data_5, aes(x = Location, y = Mean_SalaryUSD)) +
+  geom_bar(stat = "identity", color = "black",fill=blue_shades5 ) +
+  geom_text(aes(label = Mean_SalaryUSD), vjust = -0.5, size = 3) +
+  scale_fill_manual(values = blue_shades) +  # Apply custom shades of blue
+  labs(x = "Location", y = "Mean Salary", title = "10 Higher  salary Offers in Per Hour  's Location  (2024)") +
+    # Set y-axis limits
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 10))  
+```
+
+
+#### Analysis company_Score vs Annual Salary
+```{r}
+
+# Filter and prepare data for the second plot
+data61 <- df[order(df$Company_Score, decreasing = TRUE), ]
+data6 <- data61[data61$Category == "Annual", ]
+data6 <- data6[1:10, ]
+
+
+# First plot
+ ggplot(data_4, aes(x = Company, y = Mean_SalaryUSD)) +
+  geom_bar(stat = "identity", color = "black", fill = "skyblue") +
+  geom_text(aes(label = Mean_SalaryUSD), vjust = -0.5, size = 3) +
+  labs(x = "Company", y = "Mean Salary", title = "Top Annual Salaries") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 10))
+
+
+# Second plot
+ggplot(data6, aes(x = Company, y = Company_Score)) +
+  geom_bar(stat = "identity", color = "black", fill = "lightblue") +
+  geom_text(aes(label = Company_Score), vjust = -0.5, size = 3) +
+  labs(x = "Company", y = "Company Score", title = "Top Companies' Score") +
+  ylim(0, 10) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 10)) 
+
+
+
+```  
+
+#### Analysis company_Score vs Salary in Per hour
+```{r}
+
+# Filter and prepare data for the second plot
+data7 <-  data61[data61$Category == "Per Hour", ]
+
+data7 <- data7[1:10, ]
+
+
+
+
+# Second plot
+ggplot(data7, aes(x = Company, y = Company_Score)) +
+  geom_bar(stat = "identity", color = "black", fill = "lightblue") +
+  geom_text(aes(label = Company_Score), vjust = -0.5, size = 3) +
+  labs(x = "Company", y = "Company Score", title = "Top Companies' Score (Per hour)") +
+  ylim(0, 10) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 10)) 
+
+```
+
+# 4.Conclusion
+The data provided valuable insights, indicating that remote work has firmly established itself as a significant trend, with many companies increasingly adopting this model. Notably, the salary associated with remote positions is substantial. In parallel, the dataset shows that this highlights the growing importance of data in decision-making processes, as companies seek to leverage their data to attract skilled professionals. Data-related jobs are in high demand, with these professionals commanding some of the highest salaries.  
+
+Moreover, the analysis reveals that a company's success and high ratings are not solely determined by salary. Other factors, such as employee well-being, psychological comfort, and a supportive work environment, play crucial roles. This is evident when examining the top 10 companies by score, where high salaries alone did not guarantee the highest rankings. For example, although CaLSTART offers competitive salaries, it was not among the top 10 companies with the highest scores, underscoring the importance of a holistic approach to employee satisfaction.  
